@@ -1,0 +1,4 @@
+bleak
+numpy
+matplotlib
+scipy
