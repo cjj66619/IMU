@@ -6,18 +6,16 @@ import time
 from datetime import datetime
 import numpy as np
 from bleak import BleakScanner, BleakClient
+import winsound
 
 # ==========================================
 # 🔧 智能路径配置 (自动寻找 SDK)
 # ==========================================
-# 获取当前脚本所在目录 (例如: IMU/My_Experiment)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# 尝试添加当前目录、上一级目录、上上级目录到 Python 路径
-# 这样无论你把脚本放在 IMU/ 下，还是 IMU/My_Experiment/ 下，都能找到 SDK
 sys.path.append(current_dir)
-sys.path.append(os.path.dirname(current_dir)) # 上一级
-sys.path.append(os.path.dirname(os.path.dirname(current_dir))) # 上上级
+sys.path.append(os.path.dirname(current_dir)) 
+sys.path.append(os.path.dirname(os.path.dirname(current_dir))) 
 
 try:
     from movella_dot_py.core.sensor import MovellaDOTSensor
@@ -32,20 +30,18 @@ except ImportError:
 # ⚙️ [配置区域] MAC 地址设置
 # ==========================================
 SENSOR_MAP = {
-    # 格式: "MAC地址": "部位名称"
-    # ⚠️ 请务必在此填入你真实的传感器地址
-    "D4:22:CD:00:7F:30": "Left_Thigh",  # 左大腿
-    "D4:22:CD:00:7F:3A": "Left_Shank"   # 左小腿
+    "D4:22:CD:00:7F:3A": "Left_Shank",
+    "D4:22:CD:00:7F:30": "Left_Foot"
 }
 
 TARGET_ADDRESSES = set(SENSOR_MAP.keys())
-COLLECTION_TIME_SEC = 20  # 采集时长 (秒)
-OUTPUT_RATE = OutputRate.RATE_60  # 采样率 60Hz
+COLLECTION_TIME_SEC = 30  # 采集时长 (秒)
+OUTPUT_RATE = OutputRate.RATE_30 # 采样率 60Hz
 
 # ==========================================
 # 物理常量与计算函数
 # ==========================================
-G_CONST = 9.80665
+G_CONST = 9.7949
 DEG_TO_RAD = np.pi / 180.0
 
 def quaternion_to_euler_rad(q):
@@ -78,7 +74,6 @@ async def connect_sensor_with_retry(address, role, config):
         try:
             print(f"  [{role}] 正在尝试连接 (第 {attempt+1}/{max_retries} 次)...", end=" ", flush=True)
             
-            # 针对性扫描，获取最新蓝牙对象
             device = await BleakScanner.find_device_by_address(address, timeout=10.0)
             
             if not device:
@@ -115,9 +110,8 @@ async def connect_sensor_with_retry(address, role, config):
     return None
 
 async def main():
-    print("=== 左腿步态数据采集 (My_Experiment 版) ===")
+    print("=== 左小腿步态数据采集 (蓝牙实时防拥塞版) ===")
     
-    # 自动创建本地 data_log 文件夹
     save_dir = os.path.join(current_dir, "data_log")
     os.makedirs(save_dir, exist_ok=True)
     print(f"📂 数据存储路径: {save_dir}")
@@ -136,7 +130,7 @@ async def main():
     # 2. 配置
     config = SensorConfiguration(
         output_rate=OUTPUT_RATE,
-        filter_profile=FilterProfile.DYNAMIC,
+        filter_profile=FilterProfile.GENERAL,
         payload_mode=PayloadMode.CUSTOM_MODE_5
     )
 
@@ -155,26 +149,49 @@ async def main():
     if not sensors:
         return
 
-    # 4. 采集
+    # 4. 采集 (带声音倒计时)
     try:
         print(f"\n[3/5] 准备就绪。")
         print("=" * 40)
-        print("!!! 请保持静止 3 秒用于标定，然后开始行走 !!!")
+        
+        PRE_START_COUNTDOWN = 5
+        print(f"🔊 听觉指令模式：将在 {PRE_START_COUNTDOWN} 秒后发出开始信号...")
+        print("   (听到长音 '哔——' 请立即行走)")
+
+        for i in range(PRE_START_COUNTDOWN, 0, -1):
+            print(f"⏰ 倒计时: {i} ... ", end='\r', flush=True)
+            winsound.Beep(600, 200)
+            await asyncio.sleep(0.8)
+            
+        print(f"🚀 GO! 开始行走! (记录 {COLLECTION_TIME_SEC} 秒)        ")
         print("=" * 40)
         
-        await asyncio.gather(*(sensor.start_measurement() for sensor in sensors), return_exceptions=True)
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, winsound.Beep, 1000, 800)
         
+        start_ts = datetime.now()
+        
+        # 【修改 1】: 废弃 gather 并发，采用错位启动，降低蓝牙通讯带宽峰值
+        for sensor in sensors:
+            await sensor.start_measurement()
+            await asyncio.sleep(0.1)  # 缓冲 100ms
+
+        # 采集循环
         for i in range(COLLECTION_TIME_SEC, 0, -1):
             print(f"正在采集: 剩余 {i} 秒...", end='\r')
             await asyncio.sleep(1)
         print("\n时间到! 正在停止...")
 
-        await asyncio.gather(*(sensor.stop_measurement() for sensor in sensors), return_exceptions=True)
+        # 【修改 2】: 错位停止
+        for sensor in sensors:
+            await sensor.stop_measurement()
+            await asyncio.sleep(0.1)
+
         await asyncio.sleep(1.0)
 
         # 5. 保存
         print("\n[4/5] 保存数据...")
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp_str = start_ts.strftime("%Y%m%d_%H%M%S")
 
         for sensor in sensors:
             try:
@@ -188,13 +205,12 @@ async def main():
                 quats = data['quaternions']
                 accs = data['accelerations']
                 gyros = data['angular_velocities']
-                
-                timestamps_rel_ms = (timestamps - timestamps[0]) / 1000.0
 
                 with open(filename, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
+                    # 【修改 3】: 表头改为保存原始时间戳 Raw_Timestamp
                     writer.writerow([
-                        "Timestamp_ms",
+                        "Raw_Timestamp", 
                         "Acc_X(g)", "Acc_Y(g)", "Acc_Z(g)",
                         "Gyr_X(rad/s)", "Gyr_Y(rad/s)", "Gyr_Z(rad/s)",
                         "Roll(rad)", "Pitch(rad)", "Yaw(rad)",
@@ -208,13 +224,13 @@ async def main():
                         q = quats[i]
 
                         writer.writerow([
-                            f"{timestamps_rel_ms[i]:.2f}",
+                            f"{timestamps[i]}",  # 【修改 4】: 直接写入原始时间戳数据，不进行归零计算
                             f"{acc_g[0]:.6f}", f"{acc_g[1]:.6f}", f"{acc_g[2]:.6f}",
                             f"{gyr_rad[0]:.6f}", f"{gyr_rad[1]:.6f}", f"{gyr_rad[2]:.6f}",
                             f"{r:.6f}", f"{p:.6f}", f"{y:.6f}",
                             f"{q[0]:.6f}", f"{q[1]:.6f}", f"{q[2]:.6f}", f"{q[3]:.6f}"
                         ])
-                print(f"  ✅ 保存成功: {os.path.basename(filename)}")
+                print(f"  ✅ 保存成功: {os.path.basename(filename)} (共 {len(timestamps)} 行)")
             
             except Exception as e:
                 print(f"  ❌ 保存出错: {e}")
