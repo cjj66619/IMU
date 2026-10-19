@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMU 采集 · Movella DOT</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>IMU 采集 <small>Movella DOT</small></h1>
+  <div id="status" class="pill">加载中…</div>
+</header>
+<div id="error" class="banner hidden"></div>
+
+<main>
+  <!-- ① 连接 -->
+  <section class="card" id="card-connect">
+    <h2><span class="step">1</span>连接传感器</h2>
+    <p class="hint">传感器开机（不要放在充电盒里、不要被手机 App 连着），点「扫描」→ 勾选 → 「连接」。名字会用作文件名，可随时改。</p>
+    <div class="row">
+      <button id="btn-scan" class="primary">扫描传感器</button>
+      <button id="btn-connect">连接所选</button>
+      <button id="btn-disconnect" class="ghost">断开全部</button>
+    </div>
+    <div id="scanned"></div>
+    <table id="devices" class="hidden">
+      <thead><tr><th>名字</th><th>MAC</th><th>电量</th><th>采样率</th><th>滤波</th><th>芯片录制</th><th>固件</th><th>实时</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- ② 设置 -->
+  <section class="card" id="card-settings">
+    <h2><span class="step">2</span>采集设置 <small class="hint">改完立即写入传感器</small></h2>
+    <div class="grid">
+      <label class="wide">采集方式
+        <div class="seg" id="mode">
+          <button data-v="live">实时传到电脑<small>边采边存 CSV，可看实时曲线</small></button>
+          <button data-v="onboard">存在传感器芯片里<small>最高 120 Hz、不怕蓝牙掉包，采完用 USB 导出</small></button>
+        </div>
+      </label>
+      <label>采样率 (Hz)<select id="rate"></select></label>
+      <label id="lbl-payload">数据内容<select id="payload"></select></label>
+      <label>滤波模式<select id="filter"></select><small class="hint">General 日常 / Dynamic 剧烈运动</small></label>
+      <label>采集时长 (秒)<input id="duration" type="number" min="0" max="36000"><small class="hint">0 = 手动点「停止」</small></label>
+      <label>开始前倒计时 (秒)<input id="countdown" type="number" min="0" max="10"></label>
+      <label>文件名备注<input id="tag" type="text" maxlength="40" placeholder="如 walk1、S01（可空）"></label>
+      <label id="lbl-sync" class="check"><input id="sync" type="checkbox"> 多传感器硬件同步<small class="hint">≥2 个传感器时生效，开始前约 15 秒</small></label>
+    </div>
+  </section>
+
+  <!-- ③ 保存位置 -->
+  <section class="card" id="card-output">
+    <h2><span class="step">3</span>保存位置</h2>
+    <div class="row">
+      <code id="out-dir" class="path"></code>
+      <button id="btn-pick">选择文件夹…</button>
+      <button id="btn-open" class="ghost">打开文件夹</button>
+    </div>
+    <p class="hint">每次采集会新建一个子文件夹 <code>IMU_日期_时间[_备注]</code>，里面每个传感器一个 CSV + session_info.json。</p>
+  </section>
+
+  <!-- 开始 -->
+  <section class="card" id="card-run">
+    <div class="run">
+      <button id="btn-start" class="go">开始采集</button>
+      <button id="btn-stop" class="stop hidden">停止</button>
+      <div class="progress"><div id="bar"></div></div>
+      <div id="run-text" class="run-text"></div>
+    </div>
+    <div id="live"></div>
+    <div id="result" class="hidden"></div>
+  </section>
+
+  <!-- 芯片数据 -->
+  <section class="card" id="card-usb">
+    <h2><span class="step">USB</span>芯片里的数据（导出 / 清空）</h2>
+    <p class="hint">「存在传感器芯片里」采完后：把传感器放回充电盒，盒子用 USB 插电脑（或数据线直连），点「查找」。导出的文件会自动放回对应的采集文件夹。</p>
+    <div class="row">
+      <button id="btn-usb-scan" class="primary">查找 USB 传感器</button>
+      <button id="btn-usb-export">全部导出到保存位置</button>
+      <button id="btn-usb-erase" class="danger">清空所选芯片</button>
+    </div>
+    <div id="usb-job" class="hidden"></div>
+    <table id="usb" class="hidden">
+      <thead><tr><th><input type="checkbox" id="usb-all" checked></th><th>名字</th><th>MAC</th><th>录制段数</th><th>已用空间</th><th>录制列表</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <details class="card" id="card-log">
+    <summary>运行日志</summary>
+    <pre id="log"></pre>
+  </details>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

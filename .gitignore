@@ -1,5 +1,5 @@
-/venv/
-/__pycache__/
-/data_logging/
+# 采集数据和本机设置不进仓库
+data/
+imu_app/settings.json
+__pycache__/
 *.pyc
-/movella_dot_py.egg-info/
